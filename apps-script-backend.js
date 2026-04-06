@@ -165,5 +165,168 @@ function refreshFromSAP() {
   }
 }
 
+// ---- REFRESH COST DATA FROM SAP BOM ----
+function refreshCosts() {
+  try {
+    var conn = Jdbc.getConnection(SAP_JDBC_URL, SAP_USER, SAP_PASS);
+    var stmt = conn.createStatement();
+
+    // SAP B1 BOM (Bill of Materials) query — gets cost per product
+    var costQuery = `
+      SELECT
+        T0."Father"       AS "ParentCode",
+        T2."ItemName"     AS "ParentName",
+        T2."AvgPrice"     AS "CostPerUnit",
+        SUM(T0."Quantity" * T1."AvgPrice") AS "BatchCost",
+        T0."Qauntity"     AS "BatchQty",
+        T2."AvgPrice"     AS "TotalCost"
+      FROM ITT1 T0
+      INNER JOIN OITM T1 ON T0."Code" = T1."ItemCode"
+      INNER JOIN OITM T2 ON T0."Father" = T2."ItemCode"
+      WHERE T2."SellItem" = 'Y'
+      GROUP BY T0."Father", T2."ItemName", T2."AvgPrice", T0."Qauntity"
+      ORDER BY T0."Father"
+    `;
+
+    var rs = stmt.executeQuery(costQuery);
+    var rows = [];
+    while (rs.next()) {
+      rows.push([
+        rs.getString('ParentCode'),
+        rs.getDouble('CostPerUnit'),
+        rs.getDouble('BatchCost'),
+        rs.getDouble('BatchQty') || 1,
+        0, // WasteCost
+        0, // WastePercent
+        0, // OverheadPerUnit
+        rs.getDouble('TotalCost'),
+        '[]' // Components
+      ]);
+    }
+    rs.close(); stmt.close(); conn.close();
+
+    // Write to CostData sheet
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('CostData');
+    if (!sheet) sheet = ss.insertSheet('CostData');
+    sheet.clearContents();
+    sheet.appendRow(['ParentCode','CostPerUnit','BatchCost','BatchQty','WasteCost','WastePercent','OverheadPerUnit','TotalCost','Components']);
+    if (rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, 9).setValues(rows);
+    }
+
+    var syncTime = new Date().toLocaleString('he-IL');
+    PropertiesService.getScriptProperties().setProperty('lastCostSync', syncTime);
+    return { status: 'ok', message: 'Cost data refreshed', rowCount: rows.length };
+  } catch (err) {
+    return { status: 'error', message: 'Cost refresh failed: ' + err.message };
+  }
+}
+
+// ---- REFRESH EXPENSES FROM SAP GL ----
+function refreshExpenses() {
+  try {
+    var conn = Jdbc.getConnection(SAP_JDBC_URL, SAP_USER, SAP_PASS);
+    var stmt = conn.createStatement();
+
+    // SAP B1 GL Journal Entries — expense accounts (8xxx)
+    var expQuery = `
+      SELECT
+        LEFT(CAST(T0."RefDate" AS VARCHAR), 7) AS "Month",
+        SUM(T0."Debit" - T0."Credit") AS "Total"
+      FROM JDT1 T0
+      WHERE T0."Account" LIKE '8%'
+        AND T0."RefDate" >= '2024-01-01'
+      GROUP BY LEFT(CAST(T0."RefDate" AS VARCHAR), 7)
+      ORDER BY "Month"
+    `;
+
+    var rs = stmt.executeQuery(expQuery);
+    var expenses = {};
+    while (rs.next()) {
+      var month = rs.getString('Month');
+      expenses[month] = { total: rs.getDouble('Total') };
+    }
+    rs.close(); stmt.close(); conn.close();
+
+    // Write expenses.json content to a sheet for the dashboard to read
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('ExpenseData');
+    if (!sheet) sheet = ss.insertSheet('ExpenseData');
+    sheet.clearContents();
+    sheet.getRange(1,1).setValue(JSON.stringify(expenses));
+
+    return { status: 'ok', message: 'Expenses refreshed', months: Object.keys(expenses).length };
+  } catch (err) {
+    return { status: 'error', message: 'Expense refresh failed: ' + err.message };
+  }
+}
+
+// ---- ENHANCED doGet — support type parameter ----
+function doGetEnhanced(e) {
+  var type = (e && e.parameter && e.parameter.type) || '';
+  var action = (e && e.parameter && e.parameter.action) || '';
+  var callback = (e && e.parameter && e.parameter.callback) || '';
+
+  var result;
+  if (type === 'costs') {
+    // Return CostData sheet as CSV
+    result = getSheetCSV('CostData');
+  } else if (type === 'stock') {
+    result = getSheetCSV('StockData');
+  } else if (type === 'expenses') {
+    result = getExpensesJSON();
+  } else if (action === 'refresh') {
+    result = refreshFromSAP();
+  } else if (action === 'refreshCosts') {
+    refreshCosts();
+    result = getSheetCSV('CostData');
+  } else if (action === 'refreshExpenses') {
+    refreshExpenses();
+    result = getExpensesJSON();
+  } else {
+    // Default: return SalesData as CSV
+    result = getSheetCSV(SHEET_NAME);
+  }
+
+  // Support JSONP callback for Safari
+  if (callback) {
+    return ContentService
+      .createTextOutput(callback + '(' + JSON.stringify(result) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return ContentService
+    .createTextOutput(result)
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
+function getSheetCSV(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return '';
+  var data = sheet.getDataRange().getValues();
+  return data.map(function(row) {
+    return row.map(function(cell) {
+      if (cell instanceof Date) {
+        return Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      var s = String(cell);
+      if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }).join(',');
+  }).join('\n');
+}
+
+function getExpensesJSON() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ExpenseData');
+  if (!sheet) return '{}';
+  return sheet.getRange(1,1).getValue() || '{}';
+}
+
 // ---- SCHEDULED TRIGGER (optional: run every hour) ----
 // Set up via Apps Script Triggers: refreshFromSAP, Time-driven, Every hour
+// Also add: refreshCosts, Time-driven, Every day
