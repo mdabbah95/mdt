@@ -1,0 +1,14 @@
+{
+  "name": "medi-sap-sync",
+  "version": "1.0.0",
+  "description": "MEDI SAP B1 Sync Server - syncs sales, stock, costs and expenses to Google Sheets",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "sync": "node -e \"require('./sap-sync').syncNow(true).then(r=>console.log(r)).catch(e=>console.error(e))\"",
+    "sync-quick": "node -e \"require('./sap-sync').syncNow(false).then(r=>console.log(r)).catch(e=>console.error(e))\""
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}
