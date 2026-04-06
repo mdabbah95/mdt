@@ -4973,15 +4973,22 @@ const APP = (() => {
     }
 
     async function _loadExpenses(){
+        const ts=Date.now();
+        // Method 1: Static expenses.json on same origin (Netlify)
         try{
-            const r=await fetch('expenses.json?_t='+Date.now());
-            if(!r.ok)return;
-            const data=await r.json();
-            if(data&&typeof data==='object'&&Object.keys(data).length>0){
-                S.monthlyExpenses=data;
-                if(window.__DEBUG)console.log('expenses: loaded',Object.keys(data).length,'months');
-            }
-        }catch(e){if(window.__DEBUG)console.log('expenses:',e.message);}
+            const r=await fetch('expenses.json?_t='+ts);
+            if(r.ok){const data=await r.json();if(data&&typeof data==='object'&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from static JSON',Object.keys(data).length,'months');return;}}
+        }catch(e){}
+        // Method 2: Apps Script
+        try{
+            if(SCRIPT_URL){const r=await fetch(SCRIPT_URL+'?type=expenses&_t='+ts);if(r.ok){const t=await r.text();if(t&&t.startsWith('{')){const data=JSON.parse(t);if(data&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from Apps Script',Object.keys(data).length,'months');return;}}}}
+        }catch(e){}
+        // Method 3: ExpenseData sheet via gviz
+        try{
+            const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=ExpenseData&_t=${ts}`);
+            if(r.ok){const t=await r.text();if(t&&t.length>5&&!t.includes('<!DOCTYPE')){try{const data=JSON.parse(t.replace(/^"(.*)"$/,'$1').replace(/""/g,'"'));if(data&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from ExpenseData sheet');return;}}catch(e){}}}
+        }catch(e){}
+        console.log('expenses: no data source available');
     }
 
     function _updateSyncFromData(){
