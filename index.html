@@ -4778,7 +4778,7 @@ const APP = (() => {
     // ──── INIT ────
     // ──── GOOGLE SHEETS INTEGRATION ────
     const SHEET_ID='1IL5tujMfG22j5mAVkkdGae_czUu4Ec0ZQnUeiqrNfzU';
-    const SHEET_GID='476107880';
+    const SHEET_GID='710074688';
     const SHEET_EDIT=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit?gid=${SHEET_GID}`;
     let SCRIPT_URL=localStorage.getItem('script_url')||'https://script.google.com/macros/s/AKfycbyP0VCm0xjm-JnkOAvsY6mmbdSOKAPI-541k25qqumev9doPwL4ewi4WHByTm9Q5iCz/exec';
 
@@ -4974,21 +4974,54 @@ const APP = (() => {
 
     async function _loadExpenses(){
         const ts=Date.now();
+        const errors=[];
         // Method 1: Static expenses.json on same origin (Netlify)
         try{
             const r=await fetch('expenses.json?_t='+ts);
-            if(r.ok){const data=await r.json();if(data&&typeof data==='object'&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from static JSON',Object.keys(data).length,'months');return;}}
-        }catch(e){}
-        // Method 2: Apps Script
+            if(r.ok){const data=await r.json();if(data&&typeof data==='object'&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from static JSON',Object.keys(data).length,'months');return;}else{errors.push('M1: expenses.json empty or invalid');}}
+            else errors.push('M1: HTTP '+r.status);
+        }catch(e){errors.push('M1: '+e.message);}
+        // Method 2: Apps Script ?type=expenses
         try{
-            if(SCRIPT_URL){const r=await fetch(SCRIPT_URL+'?type=expenses&_t='+ts);if(r.ok){const t=await r.text();if(t&&t.startsWith('{')){const data=JSON.parse(t);if(data&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from Apps Script',Object.keys(data).length,'months');return;}}}}
-        }catch(e){}
+            if(SCRIPT_URL){
+                const r=await fetch(SCRIPT_URL+'?type=expenses&_t='+ts,{redirect:'follow'});
+                if(r.ok){
+                    const t=(await r.text()).trim();
+                    console.log('expenses M2 raw response:',t.substring(0,200));
+                    if(t&&t.length>2){
+                        // Handle possible double-stringified JSON or BOM
+                        let cleaned=t;
+                        if(cleaned.charCodeAt(0)===0xFEFF)cleaned=cleaned.substring(1);
+                        // Try parse: might be raw JSON or CSV-wrapped
+                        let data;
+                        try{data=JSON.parse(cleaned);}catch(e1){
+                            // Try unwrapping CSV quotes: ""{...}""
+                            try{data=JSON.parse(cleaned.replace(/^"(.*)"$/s,'$1').replace(/""/g,'"'));}catch(e2){
+                                errors.push('M2: parse failed: '+e1.message+' / '+e2.message);
+                            }
+                        }
+                        if(data&&typeof data==='object'&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from Apps Script',Object.keys(data).length,'months');return;}
+                        else{errors.push('M2: parsed but empty (keys='+Object.keys(data||{}).length+')');}
+                    }else{errors.push('M2: response too short (len='+t.length+')');}
+                }else{errors.push('M2: HTTP '+r.status);}
+            }else{errors.push('M2: no SCRIPT_URL');}
+        }catch(e){errors.push('M2: '+e.message);}
         // Method 3: ExpenseData sheet via gviz
         try{
             const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=ExpenseData&_t=${ts}`);
-            if(r.ok){const t=await r.text();if(t&&t.length>5&&!t.includes('<!DOCTYPE')){try{const data=JSON.parse(t.replace(/^"(.*)"$/,'$1').replace(/""/g,'"'));if(data&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from ExpenseData sheet');return;}}catch(e){}}}
-        }catch(e){}
-        console.log('expenses: no data source available');
+            if(r.ok){
+                const t=await r.text();
+                console.log('expenses M3 raw response:',t.substring(0,200));
+                if(t&&t.length>5&&!t.includes('<!DOCTYPE')){
+                    let cleaned=t.trim();
+                    // gviz wraps cell content in CSV quotes: ""{"key":"val"}""
+                    if(cleaned.startsWith('"')&&cleaned.endsWith('"')){cleaned=cleaned.slice(1,-1).replace(/""/g,'"');}
+                    try{const data=JSON.parse(cleaned);if(data&&Object.keys(data).length>0){S.monthlyExpenses=data;console.log('expenses: loaded from ExpenseData sheet');return;}else{errors.push('M3: parsed but empty');}}
+                    catch(e){errors.push('M3: parse error: '+e.message);}
+                }else{errors.push('M3: got HTML or too short (len='+(t||'').length+')');}
+            }else{errors.push('M3: HTTP '+r.status);}
+        }catch(e){errors.push('M3: '+e.message);}
+        console.warn('expenses: no data source available. Errors:',errors.join(' | '));
     }
 
     function _updateSyncFromData(){
