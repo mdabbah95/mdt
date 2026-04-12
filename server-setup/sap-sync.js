@@ -631,7 +631,7 @@ async function fetchMonthlyExpenses(monthsBack = 18) {
             const sorted = Object.entries(accounts)
                 .map(([code, d]) => ({ code, name: d.name, amount: Math.round(d.amount) }))
                 .sort((a, b) => b.amount - a.amount);
-            results[ym] = { total: Math.round(total), entries: entries.length, accounts: sorted };
+            results[ym] = { total: Math.round(total), entries: entries.length, accounts: sorted.slice(0, 15) };
             log('EXPENSES', `  ${ym}: ₪${Math.round(total).toLocaleString()} (${entries.length} JEs)`);
         } catch (e) {
             log('EXPENSES', `  ${ym} error: ${e.message}`);
