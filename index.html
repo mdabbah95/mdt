@@ -814,6 +814,7 @@
 
     <select id="srcFilter" onchange="APP.recalc()" class="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg px-1.5 py-1 text-[10px] font-bold text-ink-500 cursor-pointer"><option value="all" data-i18n="allSources">כל המקורות</option></select>
     <select id="wgtFilter" onchange="APP.recalc()" class="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg px-1.5 py-1 text-[10px] font-bold text-ink-500 cursor-pointer"><option value="all" data-i18n="allWeights">כל המשקלים</option></select>
+    <select id="typeFilter" onchange="APP.recalc()" class="bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-lg px-1.5 py-1 text-[10px] font-bold text-ink-500 cursor-pointer"><option value="all">כל הסוגים</option></select>
 
     <div class="flex bg-ink-100 dark:bg-ink-800 p-0.5 rounded-lg gap-0.5">
         <button onclick="APP.setAbc('all')" id="fAll" class="px-2 py-0.5 text-[9px] font-bold rounded bg-white dark:bg-ink-700 text-gold-600 shadow-sm">All</button>
@@ -1876,7 +1877,7 @@ const APP = (() => {
     function processData(rows,headers){
         const m={code:findCol(headers,COLS.itemCode),name:findCol(headers,COLS.itemName),qty:findCol(headers,COLS.qty),date:findCol(headers,COLS.date),cust:findCol(headers,COLS.cardName),price:findCol(headers,COLS.price),total:findCol(headers,COLS.total),weight:findCol(headers,COLS.weight)};
         if(!m.code||!m.qty){toast('❌ '+(S.lang==='en'?'Missing required columns':'עמודות חובה חסרות'),'danger');return;}
-        S.raw=[];let dates=[],srcSet=new Set(),wgtSet=new Set();
+        S.raw=[];let dates=[],srcSet=new Set(),wgtSet=new Set(),typeSet=new Set();
         let _skippedNoQty=0,_skippedNoDate=0,_skippedNoCode=0,_negativeQty=0,_duplicateCodes=new Set();
         rows.forEach(row=>{let code=row[m.code],qS=row[m.qty];if(!qS&&qS!==0){_skippedNoQty++;return;}let qty=numParse(qS);if(!code){_skippedNoCode++;return;}if(isNaN(qty)){_skippedNoQty++;return;}if(qty<0)_negativeQty++;let ds=row[m.date];if(!ds){_skippedNoDate++;return;}let y,mo,dy;if(ds instanceof Date){y=ds.getFullYear();mo=String(ds.getMonth()+1).padStart(2,'0');dy=String(ds.getDate()).padStart(2,'0');}else{ds=ds.trim();if(ds.match(/^\d{4}-\d{2}-\d{2}/)){y=ds.substring(0,4);mo=ds.substring(5,7);dy=ds.substring(8,10);}else if(ds.match(/^\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}/)){let p=ds.split(' ')[0].split(/[\/\.]/);dy=p[0].padStart(2,'0');mo=p[1].padStart(2,'0');y=p[2];if(y.length===2)y='20'+y;}else return;}
             let mk=`${y}-${mo}`,dk=`${y}-${mo}-${dy}`;dates.push(mk);
@@ -1886,13 +1887,15 @@ const APP = (() => {
             let weight=0,unitWeight=0;if(m.weight){let w=numParse(row[m.weight]);if(!isNaN(w)){if(m.weight.toLowerCase().includes('unit')){unitWeight=w;weight=qty*w;}else{unitWeight=qty!==0?w/qty:0;weight=w;}if(unitWeight>30)unitWeight/=1000;unitWeight=Math.round(unitWeight*100)/100;}}
             if(rn){const wm=rn.match(/(\d+)\s*(?:גרם|גר)/);const wk=rn.match(/(\d+(?:\.\d+)?)\s*(?:ק"ג|קג|קילו)/);if(wm)unitWeight=parseInt(wm[1])/1000;if(wk)unitWeight=parseFloat(wk[1]);}
             let source='סלטי היום';const nn=rn.toLowerCase();if(nn.includes('פיקניק'))source='מוצרי פיקניק';else if(nn.includes('רמי לוי'))source='מוצרי רמי לוי';else if(rc.startsWith('6'))source='מוצרי יבוא';else if(nn.includes('מעדניה'))source='המעדניה';
-            srcSet.add(source);if(unitWeight>0)wgtSet.add(unitWeight);
-            S.raw.push({code:clean(rc),name:clean(rn),qty,val,weight,unitWeight,cust:clean(row[m.cust]),monthKey:mk,dailyKey:dk,source});
+            let ptype='אחר';if(nn.includes('חומוס')||nn.includes('hummus'))ptype='חומוס';else if(nn.includes('טחינה')||nn.includes('tahini'))ptype='טחינה';else if(nn.includes('מטבוחה')||nn.includes('matbucha'))ptype='מטבוחה';else if(nn.includes('חציל')||nn.includes('eggplant'))ptype='חצילים';else if(nn.includes('מסבחה')||nn.includes('msabaha'))ptype='מסבחה';else if(nn.includes('סביח'))ptype='סביח';else if(nn.includes('אבוקדו')||nn.includes('guac'))ptype='אבוקדו';else if(nn.includes('סחוג'))ptype='סחוג';else if(nn.includes('אריסה'))ptype='אריסה';else if(nn.includes('שום'))ptype='שום';else if(nn.includes('כרוב'))ptype='כרוב';else if(nn.includes('ממרח'))ptype='ממרחים';else if(nn.includes('סלט'))ptype='סלטים';
+            srcSet.add(source);typeSet.add(ptype);if(unitWeight>0)wgtSet.add(unitWeight);
+            S.raw.push({code:clean(rc),name:clean(rn),qty,val,weight,unitWeight,cust:clean(row[m.cust]),monthKey:mk,dailyKey:dk,source,ptype});
         });
         dates.sort();S.allDates=[...new Set(dates)].sort();
         if(dates.length){$('startDate').value=dates[0];$('endDate').value=dates[dates.length-1];}
         const sf=$('srcFilter');sf.innerHTML='<option value="all">'+(I18N[S.lang]||I18N.he).allSources+'</option>';srcSet.forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sf.appendChild(o);});
         const wf=$('wgtFilter');wf.innerHTML='<option value="all">'+(I18N[S.lang]||I18N.he).allWeights+'</option>';[0.1,0.2,0.25,0.4,0.5,1,2,3].forEach(w=>{if(wgtSet.has(w)){const o=document.createElement('option');o.value=w;o.textContent=w+' Kg';wf.appendChild(o);}});
+        const tf=$('typeFilter');tf.innerHTML='<option value="all">כל הסוגים</option>';[...typeSet].sort().forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;tf.appendChild(o);});
         $('welcomeScreen').classList.add('hidden');$('filterBar').style.display='flex';$('toolsRibbon').style.display='flex';$('mainContent').style.display='flex';setTimeout(renderInsightsBar,300);
         try{const req=indexedDB.open('SalesPRO',1);req.onupgradeneeded=e=>e.target.result.createObjectStore('c');req.onsuccess=e=>{const db=e.target.result;const tx=db.transaction('c','readwrite');tx.objectStore('c').put({raw:S.raw,stock:S.stockData,dates:S.allDates},'last');};}catch(e){}
         renderPresets();
@@ -1910,7 +1913,7 @@ const APP = (() => {
     function recalcDebounced(){clearTimeout(_recalcTimer);_recalcTimer=setTimeout(recalc,50);}
     function recalc(){
         const s0=$('startDate').value||'0000-00',s1=$('endDate').value||'9999-99';
-        const useCode=$('codeFilter').checked,srcF=$('srcFilter').value,wgtF=$('wgtFilter').value;
+        const useCode=$('codeFilter').checked,srcF=$('srcFilter').value,wgtF=$('wgtFilter').value,typeF=$('typeFilter').value;
         const wV=wgtF==='all'?'all':parseFloat(wgtF);
         S.timeMode=(s0===s1)?'daily':'monthly';S.masterKeys=genKeys(s0,s1,S.timeMode);
         const pC=Math.max(1,S.masterKeys.length);
@@ -1924,6 +1927,7 @@ const APP = (() => {
             if(r.monthKey<s0||r.monthKey>s1)continue;
             if(useCode){const c=r.code.toString();if(!c.startsWith('1')&&!c.startsWith('6')&&!c.startsWith('P'))continue;}
             if(srcF!=='all'&&r.source!==srcF)continue;
+            if(typeF!=='all'&&r.ptype!==typeF)continue;
             if(wV!=='all'&&Math.abs(r.unitWeight-wV)>0.001)continue;
 
             let tk=S.timeMode==='daily'?r.dailyKey:r.monthKey;
@@ -1934,7 +1938,7 @@ const APP = (() => {
 
             let d=new Date(r.dailyKey);if(!isNaN(d.getTime())){let yy=d.getFullYear(),mm=d.getMonth();['qty','val','weight'].forEach(k=>{if(!S.seasonCache[k][yy])S.seasonCache[k][yy]=Array(12).fill(0);S.seasonCache[k][yy][mm]+=r[k];});}
 
-            if(!S.products[r.code])S.products[r.code]={code:r.code,name:r.name,source:r.source,unitWeight:r.unitWeight,totalQty:0,totalVal:0,history:{},valHistory:{},customers:{}};
+            if(!S.products[r.code])S.products[r.code]={code:r.code,name:r.name,source:r.source,ptype:r.ptype,unitWeight:r.unitWeight,totalQty:0,totalVal:0,history:{},valHistory:{},customers:{}};
             let p=S.products[r.code];p.totalQty+=r.qty;p.totalVal+=r.val;p.history[tk]=(p.history[tk]||0)+r.qty;p.valHistory[tk]=(p.valHistory[tk]||0)+r.val;
             if(r.qty>0){if(!p.customers[r.cust])p.customers[r.cust]={qty:0,val:0};p.customers[r.cust].qty+=r.qty;p.customers[r.cust].val+=r.val;}
 
@@ -4662,7 +4666,7 @@ const APP = (() => {
     function toggleSeasonal(){S.seasonal=!S.seasonal;$('seasonalTgl').classList.toggle('on',S.seasonal);renderMainChart();}
     function toggleMA(){S.showMA=!S.showMA;$('maTgl').classList.toggle('on',S.showMA);renderMainChart();}
     function setAbc(f){S.abcFilter=f;['fAll','fA','fB','fC'].forEach(id=>{const el=$(id);el.className='px-2 py-0.5 text-[9px] font-bold rounded '+(id==='f'+(f==='all'?'All':f)?'bg-white dark:bg-ink-700 text-sky-500 shadow-sm':'text-ink-400');});S.page=1;renderTable();}
-    function resetFilters(){S._insightFilter=null;$('searchInput').value='';S.abcFilter='all';S.drillFilter=null;$('drillLabel').classList.add('hidden');$('srcFilter').value='all';$('wgtFilter').value='all';setAbc('all');if(S.allDates.length){$('startDate').value=S.allDates[0];$('endDate').value=S.allDates[S.allDates.length-1];}recalc();}
+    function resetFilters(){S._insightFilter=null;$('searchInput').value='';S.abcFilter='all';S.drillFilter=null;$('drillLabel').classList.add('hidden');$('srcFilter').value='all';$('wgtFilter').value='all';$('typeFilter').value='all';setAbc('all');if(S.allDates.length){$('startDate').value=S.allDates[0];$('endDate').value=S.allDates[S.allDates.length-1];}recalc();}
 
     // ──── RESIZERS ────
     function setTableSize(size) {
