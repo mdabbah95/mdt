@@ -4810,16 +4810,9 @@ const APP = (() => {
 
         // Method 2: gviz CSV with column selection (requires sheet to be published to web)
         try{
-            const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&tq=${encodeURIComponent('select C,F,H,I,N,P,Q,T')}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2: gviz+select returned HTML or short data');}
-            else errors.push('M2: gviz+select HTTP '+r.status);
-        }catch(e){errors.push('M2: '+e.message);}
-
-        // Method 2b: gviz CSV without column selection (in case columns changed)
-        try{
             const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2b: gviz-all returned HTML or short data');}
-            else errors.push('M2b: gviz-all HTTP '+r.status);
+            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2: gviz returned HTML or short data');}
+            else errors.push('M2: gviz HTTP '+r.status);
         }catch(e){errors.push('M2b: '+e.message);}
 
         // Method 3: export CSV (requires public sharing)
@@ -4830,7 +4823,7 @@ const APP = (() => {
         }catch(e){errors.push('M3: '+e.message);}
 
         // Method 4: CORS proxies as last resort
-        const gvizUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&tq=${encodeURIComponent('select C,F,H,I,N,P,Q,T')}`;
+        const gvizUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
         const proxies=[
             u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
             u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
