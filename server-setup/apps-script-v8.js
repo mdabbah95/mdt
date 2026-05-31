@@ -70,19 +70,31 @@ function doPost(e) {
 function handleFullSync(p) {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var written = 0;
+
+  // Clean up unnecessary sheets that waste cells
+  try {
+    var junk = ['גיליון1', 'גיליון 1', 'Sheet1', 'sync_meta', 'SyncLog'];
+    for (var j = 0; j < junk.length; j++) {
+      var s = ss.getSheetByName(junk[j]);
+      if (s && ss.getSheets().length > 1) ss.deleteSheet(s);
+    }
+  } catch(e) {}
+
   if (p.sales && p.sales.rows && p.sales.rows.length > 0) {
-    var sheet = getMainSheet();
-    sheet.clear();
-    var maxR = sheet.getMaxRows();
-    var maxC = sheet.getMaxColumns();
-    if (maxC > 8) sheet.deleteColumns(9, maxC - 8);
-    if (maxR > 2) sheet.deleteRows(3, maxR - 2);
+    // Delete old SalesData and create fresh (avoids stale data issues)
+    var oldSheet = ss.getSheetByName('SalesData');
+    var sheet = ss.insertSheet('SalesData_new');
+    if (oldSheet && ss.getSheets().length > 1) {
+      try { ss.deleteSheet(oldSheet); } catch(e) {}
+    }
+    sheet.setName('SalesData');
+
     var h = p.sales.headers || ['ItemCode','ItemName','CardName','DocDate','InvQty','NetWeight','Price','LineTotal'];
     sheet.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold');
     var rows = p.sales.rows;
     var needed = rows.length + 1;
-    var curR = sheet.getMaxRows();
-    if (curR < needed) sheet.insertRowsAfter(curR, needed - curR);
+    if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(1, needed - sheet.getMaxRows());
+    if (sheet.getMaxColumns() > h.length) sheet.deleteColumns(h.length + 1, sheet.getMaxColumns() - h.length);
     for (var i = 0; i < rows.length; i += 5000) {
       var batch = rows.slice(i, i + 5000);
       sheet.getRange(i + 2, 1, batch.length, h.length).setValues(batch);
@@ -94,7 +106,7 @@ function handleFullSync(p) {
   writeCosts(ss, p.costs);
   writeExpenses(ss, p.expenses);
   saveMeta(ss, written, 'full');
-  return jsonOut({ok: true, mode: 'full', salesWritten: written});
+  return jsonOut({ok: true, mode: 'full', salesWritten: written, salesGid: ss.getSheetByName('SalesData') ? ss.getSheetByName('SalesData').getSheetId() : 'unknown'});
 }
 
 function handleQuickUpdate(p) {
