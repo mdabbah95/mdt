@@ -4792,35 +4792,35 @@ const APP = (() => {
         const ts=Date.now();
         // Safari-compatible fetch options with timeout fallback
         let signal;
-        try { signal = AbortSignal.timeout(45000); } catch(e) {
+        try { signal = AbortSignal.timeout(120000); } catch(e) {
             const ctrl = new AbortController();
-            setTimeout(()=>ctrl.abort(), 45000);
+            setTimeout(()=>ctrl.abort(), 120000);
             signal = ctrl.signal;
         }
         const opts={cache:'no-store',redirect:'follow',signal};
 
-        // Method 1: Apps Script (works cross-origin including Safari)
+        // Method 1: gviz CSV (handles large datasets natively, no execution time limit)
         toast('📡 טוען נתונים...','info');
         const errors=[];
-        if(SCRIPT_URL){try{
-            const r=await fetch(SCRIPT_URL+'?_t='+ts,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(','))return t;errors.push('M1: Apps Script returned invalid data (len='+((t||'').length)+')');}
-            else errors.push('M1: Apps Script HTTP '+r.status);
-        }catch(e){errors.push('M1: '+e.message);}}
-
-        // Method 2: gviz CSV with column selection (requires sheet to be published to web)
         try{
             const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2: gviz returned HTML or short data');}
-            else errors.push('M2: gviz HTTP '+r.status);
-        }catch(e){errors.push('M2b: '+e.message);}
+            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M1: gviz returned HTML or short data');}
+            else errors.push('M1: gviz HTTP '+r.status);
+        }catch(e){errors.push('M1: '+e.message);}
 
-        // Method 3: export CSV (requires public sharing)
+        // Method 2: export CSV (requires public sharing)
         try{
             const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M3: export returned HTML or short data');}
-            else errors.push('M3: export HTTP '+r.status);
-        }catch(e){errors.push('M3: '+e.message);}
+            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2: export returned HTML or short data');}
+            else errors.push('M2: export HTTP '+r.status);
+        }catch(e){errors.push('M2: '+e.message);}
+
+        // Method 3: Apps Script (slower for large datasets but works cross-origin)
+        if(SCRIPT_URL){try{
+            const r=await fetch(SCRIPT_URL+'?_t='+ts,opts);
+            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(','))return t;errors.push('M3: Apps Script returned invalid data (len='+((t||'').length)+')');}
+            else errors.push('M3: Apps Script HTTP '+r.status);
+        }catch(e){errors.push('M3: '+e.message);}}
 
         // Method 4: CORS proxies as last resort
         const gvizUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
