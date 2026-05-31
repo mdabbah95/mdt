@@ -4798,32 +4798,50 @@ const APP = (() => {
             signal = ctrl.signal;
         }
         const opts={cache:'no-store',redirect:'follow',signal};
-
-        // Method 1: gviz CSV (handles large datasets natively, no execution time limit)
         toast('📡 טוען נתונים...','info');
         const errors=[];
-        try{
-            const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M1: gviz returned HTML or short data');}
-            else errors.push('M1: gviz HTTP '+r.status);
-        }catch(e){errors.push('M1: '+e.message);}
 
-        // Method 2: export CSV (requires public sharing)
-        try{
-            const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}&_t=${ts}`,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;errors.push('M2: export returned HTML or short data');}
-            else errors.push('M2: export HTTP '+r.status);
-        }catch(e){errors.push('M2: '+e.message);}
+        // Helper: check if CSV has sales headers (ItemCode + InvQty/Qty)
+        const isSalesCSV=(t)=>{
+            if(!t||t.length<100||!t.includes(',')||t.includes('<!DOCTYPE'))return false;
+            const h=t.split('\n')[0]||'';
+            return (h.includes('ItemCode')||h.includes('קוד פריט')) && (h.includes('InvQty')||h.includes('Qty')||h.includes('כמות'));
+        };
 
-        // Method 3: Apps Script (slower for large datasets but works cross-origin)
+        // Try multiple sheets — the sync may write to a tab with a different GID
+        // Fetch all candidates in parallel and pick the one with the most sales rows
+        const candidates=[];
+        const tryFetch=async(url,label)=>{
+            try{
+                const r=await fetch(url,opts);
+                if(r.ok){const t=await r.text();if(isSalesCSV(t)){candidates.push({label,data:t,rows:t.split('\n').length});return t;}}
+            }catch(e){}
+            return null;
+        };
+
+        await Promise.allSettled([
+            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&_t=${ts}`,'gviz-gid'),
+            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&_t=${ts}`,'gviz-default'),
+            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}&_t=${ts}`,'export-gid'),
+            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&_t=${ts}`,'export-default'),
+        ]);
+
+        // Pick the candidate with the most rows
+        if(candidates.length>0){
+            candidates.sort((a,b)=>b.rows-a.rows);
+            console.log('Data sources:',candidates.map(c=>c.label+'='+c.rows+'rows').join(', '));
+            return candidates[0].data;
+        }
+
+        // Fallback: Apps Script (slower for large datasets but works cross-origin)
         if(SCRIPT_URL){try{
             const r=await fetch(SCRIPT_URL+'?_t='+ts,opts);
-            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(','))return t;errors.push('M3: Apps Script returned invalid data (len='+((t||'').length)+')');}
-            else errors.push('M3: Apps Script HTTP '+r.status);
-        }catch(e){errors.push('M3: '+e.message);}}
+            if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(','))return t;errors.push('Apps Script returned invalid data');}
+            else errors.push('Apps Script HTTP '+r.status);
+        }catch(e){errors.push('Apps Script: '+e.message);}}
 
-        // Method 4: CORS proxies as last resort
-        const gvizUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
+        // Last resort: CORS proxies
+        const gvizUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
         const proxies=[
             u=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
             u=>`https://corsproxy.io/?${encodeURIComponent(u)}`,
@@ -4834,7 +4852,7 @@ const APP = (() => {
                 let proxySignal;
                 try{proxySignal=AbortSignal.timeout(30000);}catch(e){const c=new AbortController();setTimeout(()=>c.abort(),30000);proxySignal=c.signal;}
                 const r=await fetch(proxy(gvizUrl),{cache:'no-store',signal:proxySignal});
-                if(r.ok){const t=await r.text();if(t&&t.length>100&&t.includes(',')&&!t.includes('<!DOCTYPE'))return t;}
+                if(r.ok){const t=await r.text();if(isSalesCSV(t))return t;}
             }catch(e){errors.push('Proxy: '+e.message);}}
 
         console.error('Data fetch failed. All methods:\n'+errors.join('\n'));

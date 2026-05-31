@@ -211,6 +211,10 @@ function saveMeta(ss, written, mode) {
 
 function getMainSheet() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  // Prefer the sheet named 'SalesData' (most robust — won't pick wrong tab)
+  var byName = ss.getSheetByName('SalesData');
+  if (byName) return byName;
+  // Fall back to GID match
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     if (sheets[i].getSheetId() == SHEET_GID) return sheets[i];
