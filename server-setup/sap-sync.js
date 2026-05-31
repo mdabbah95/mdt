@@ -259,8 +259,21 @@ function postToAppsScript(payload) {
 
 async function syncNow(full = false) {
     if (syncInProgress) {
-        log('SYNC', 'Sync already in progress, skipping');
-        return { ok: false, reason: 'already running' };
+        if (full) {
+            log('SYNC', 'Waiting for current sync to finish before starting FULL sync...');
+            const maxWait = 900000; // 15 min max wait
+            const start = Date.now();
+            while (syncInProgress && (Date.now() - start) < maxWait) {
+                await new Promise(r => setTimeout(r, 5000));
+            }
+            if (syncInProgress) {
+                return { ok: false, reason: 'timed out waiting for current sync' };
+            }
+            log('SYNC', 'Previous sync finished, starting FULL sync now');
+        } else {
+            log('SYNC', 'Sync already in progress, skipping');
+            return { ok: false, reason: 'already running' };
+        }
     }
 
     syncInProgress = true;
@@ -657,10 +670,11 @@ function startScheduler() {
     log('SCHED', `Scheduling QUICK sync every ${mins} minutes (only last 2 months)`);
     log('SCHED', `Use /api/sync?full=true for full historical sync`);
 
-    // First sync: quick (only last 2 months) - fast startup
+    // First sync: quick (only last 2 months) - delayed 2 min to allow manual full sync first
+    log('SCHED', 'Initial QUICK sync will start in 2 minutes (trigger /api/sync?full=true now for full history)');
     setTimeout(() => {
         syncNow(false).catch(err => log('SCHED', `Initial sync failed: ${err.message}`));
-    }, 10000);
+    }, 120000);
 
     // Recurring syncs: always quick (last 2 months only, ~1 min)
     schedulerTimer = setInterval(() => {
