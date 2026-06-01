@@ -369,19 +369,63 @@ async function syncNow(full = false) {
 
         // 5. Push to Google Sheets via Apps Script
         if (CFG.scriptUrl) {
-            log('SYNC', `Pushing to Google Sheets (${mode})...`);
-            const result = await postToAppsScript({
-                action: full ? 'sync' : 'update',
-                sales: {
-                    headers: ['ItemCode', 'ItemName', 'CardName', 'DocDate', 'InvQty', 'NetWeight', 'Price', 'LineTotal'],
-                    rows: rows.map(r => [r.ItemCode, r.ItemName, r.CardName, r.Date, r.Quantity, r.UnitWeight, r.Price, r.Total]),
-                },
-                stock: items.map(i => [i.ItemCode, i.ItemName || '', i.QuantityOnStock || 0]),
-                costs: costs.map(c => [c.parentCode, c.costPerUnit, c.batchCost, c.batchQty, c.totalWasteCost, c.wastePercent, JSON.stringify(c.components)]),
-                expenses: monthlyExpenses,
-                cutoffDate: startDate.toISOString().split('T')[0],
-            });
-            log('SYNC', `Sheets response: ${JSON.stringify(result).substring(0, 200)}`);
+            const headers = ['ItemCode', 'ItemName', 'CardName', 'DocDate', 'InvQty', 'NetWeight', 'Price', 'LineTotal'];
+            const allRows = rows.map(r => [r.ItemCode, r.ItemName, r.CardName, r.Date, r.Quantity, r.UnitWeight, r.Price, r.Total]);
+            const stockData = items.map(i => [i.ItemCode, i.ItemName || '', i.QuantityOnStock || 0]);
+            const costData = costs.map(c => [c.parentCode, c.costPerUnit, c.batchCost, c.batchQty, c.totalWasteCost, c.wastePercent, JSON.stringify(c.components)]);
+
+            if (full && allRows.length > 15000) {
+                // Chunked sync: split into 15K-row chunks to avoid Apps Script 6-min timeout
+                const CHUNK = 15000;
+                const chunks = [];
+                for (let i = 0; i < allRows.length; i += CHUNK) {
+                    chunks.push(allRows.slice(i, i + CHUNK));
+                }
+                log('SYNC', `Pushing ${allRows.length} rows in ${chunks.length} chunks to Google Sheets...`);
+
+                // Chunk 1: create sheet + first batch
+                log('SYNC', `Chunk 1/${chunks.length}: creating sheet + ${chunks[0].length} rows...`);
+                const r1 = await postToAppsScript({
+                    action: 'sync',
+                    chunked: true,
+                    sales: { headers, rows: chunks[0] },
+                });
+                log('SYNC', `Chunk 1 response: ${JSON.stringify(r1).substring(0, 200)}`);
+                if (r1 && r1.ok === false) {
+                    log('SYNC', 'Chunk 1 failed, aborting');
+                } else {
+                    // Chunks 2..N: append
+                    for (let i = 1; i < chunks.length; i++) {
+                        log('SYNC', `Chunk ${i+1}/${chunks.length}: appending ${chunks[i].length} rows...`);
+                        const ra = await postToAppsScript({
+                            action: 'append',
+                            sales: { headers, rows: chunks[i] },
+                        });
+                        log('SYNC', `Chunk ${i+1} response: ${JSON.stringify(ra).substring(0, 200)}`);
+                    }
+                    // Finalize: write stock/costs/expenses
+                    log('SYNC', 'Finalizing: writing stock, costs, expenses...');
+                    const rf = await postToAppsScript({
+                        action: 'finalize',
+                        stock: stockData,
+                        costs: costData,
+                        expenses: monthlyExpenses,
+                    });
+                    log('SYNC', `Finalize response: ${JSON.stringify(rf).substring(0, 200)}`);
+                }
+            } else {
+                // Small dataset or quick update: single request
+                log('SYNC', `Pushing to Google Sheets (${mode})...`);
+                const result = await postToAppsScript({
+                    action: full ? 'sync' : 'update',
+                    sales: { headers, rows: allRows },
+                    stock: stockData,
+                    costs: costData,
+                    expenses: monthlyExpenses,
+                    cutoffDate: startDate.toISOString().split('T')[0],
+                });
+                log('SYNC', `Sheets response: ${JSON.stringify(result).substring(0, 200)}`);
+            }
         } else {
             log('SYNC', 'APPS_SCRIPT_URL not set, skipping Sheets push');
         }

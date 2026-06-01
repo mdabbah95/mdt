@@ -1,10 +1,11 @@
 /**
- * MEDI SAP Sync — Apps Script v8
+ * MEDI SAP Sync — Apps Script v9
  *
- * Changes from v7:
- * - Added expenses handling (doGet ?type=expenses, doPost writes ExpenseData)
- * - Added TotalCost + OverheadPerUnit columns to CostData
- * - Fixed writeCosts to include all 9 columns dashboard expects
+ * Supports chunked sync to avoid 6-minute execution timeout:
+ * - action "sync": creates fresh SalesData sheet + writes first chunk
+ * - action "append": appends more rows to SalesData
+ * - action "finalize": writes stock/costs/expenses + saves meta
+ * - action "update": quick update (last 2 months only, fits in one call)
  */
 
 const SPREADSHEET_ID = '1IL5tujMfG22j5mAVkkdGae_czUu4Ec0ZQnUeiqrNfzU';
@@ -29,7 +30,6 @@ function doGet(e) {
       sheet = ss.getSheetByName('StockData');
       if (!sheet) return textOut('No stock data');
     } else if (type === 'expenses') {
-      // Return expenses JSON from ExpenseData sheet
       sheet = ss.getSheetByName('ExpenseData');
       if (!sheet) return textOut('{}');
       var val = sheet.getRange('A1').getValue();
@@ -62,6 +62,8 @@ function doPost(e) {
   try {
     var p = JSON.parse(e.postData.contents);
     if (p.action === 'sync') return handleFullSync(p);
+    if (p.action === 'append') return handleAppend(p);
+    if (p.action === 'finalize') return handleFinalize(p);
     if (p.action === 'update') return handleQuickUpdate(p);
     return jsonOut({ok: false, error: 'Unknown action'});
   } catch (err) { return jsonOut({ok: false, error: err.message}); }
@@ -71,7 +73,7 @@ function handleFullSync(p) {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var written = 0;
 
-  // Clean up unnecessary sheets that waste cells
+  // Clean up junk sheets
   try {
     var junk = ['גיליון1', 'גיליון 1', 'Sheet1', 'sync_meta', 'SyncLog', 'SalesData_new'];
     for (var j = 0; j < junk.length; j++) {
@@ -81,7 +83,6 @@ function handleFullSync(p) {
   } catch(e) {}
 
   if (p.sales && p.sales.rows && p.sales.rows.length > 0) {
-    // Delete old SalesData and create fresh (avoids stale data issues)
     var oldSheet = ss.getSheetByName('SalesData');
     var sheet = ss.insertSheet('SalesData_new');
     if (oldSheet && ss.getSheets().length > 1) {
@@ -95,18 +96,48 @@ function handleFullSync(p) {
     var needed = rows.length + 1;
     if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(1, needed - sheet.getMaxRows());
     if (sheet.getMaxColumns() > h.length) sheet.deleteColumns(h.length + 1, sheet.getMaxColumns() - h.length);
-    for (var i = 0; i < rows.length; i += 5000) {
-      var batch = rows.slice(i, i + 5000);
-      sheet.getRange(i + 2, 1, batch.length, h.length).setValues(batch);
-    }
+    sheet.getRange(2, 1, rows.length, h.length).setValues(rows);
     written = rows.length;
     sheet.setFrozenRows(1);
   }
+
+  // If no more chunks coming, write everything now
+  if (!p.chunked) {
+    writeStock(ss, p.stock);
+    writeCosts(ss, p.costs);
+    writeExpenses(ss, p.expenses);
+    saveMeta(ss, written, 'full');
+  }
+
+  return jsonOut({ok: true, mode: 'full', salesWritten: written, salesGid: ss.getSheetByName('SalesData') ? ss.getSheetByName('SalesData').getSheetId() : 'unknown'});
+}
+
+function handleAppend(p) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('SalesData');
+  if (!sheet) return jsonOut({ok: false, error: 'SalesData sheet not found'});
+
+  var rows = p.sales && p.sales.rows ? p.sales.rows : [];
+  if (rows.length === 0) return jsonOut({ok: true, appended: 0});
+
+  var h = p.sales.headers || ['ItemCode','ItemName','CardName','DocDate','InvQty','NetWeight','Price','LineTotal'];
+  var lastRow = sheet.getLastRow();
+  var needed = lastRow + rows.length;
+  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+  sheet.getRange(lastRow + 1, 1, rows.length, h.length).setValues(rows);
+
+  return jsonOut({ok: true, appended: rows.length, totalRows: lastRow + rows.length});
+}
+
+function handleFinalize(p) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   writeStock(ss, p.stock);
   writeCosts(ss, p.costs);
   writeExpenses(ss, p.expenses);
-  saveMeta(ss, written, 'full');
-  return jsonOut({ok: true, mode: 'full', salesWritten: written, salesGid: ss.getSheetByName('SalesData') ? ss.getSheetByName('SalesData').getSheetId() : 'unknown'});
+  var sheet = ss.getSheetByName('SalesData');
+  var totalRows = sheet ? sheet.getLastRow() - 1 : 0;
+  saveMeta(ss, totalRows, 'full');
+  return jsonOut({ok: true, mode: 'finalize', totalRows: totalRows, salesGid: sheet ? sheet.getSheetId() : 'unknown'});
 }
 
 function handleQuickUpdate(p) {
@@ -162,21 +193,16 @@ function writeCosts(ss, costs) {
   if (!costs || costs.length === 0) return;
   var sheet = getOrCreate(ss, 'CostData');
   sheet.clear();
-  // v8: Added OverheadPerUnit and TotalCost columns for dashboard compatibility
   var h = ['ParentCode','CostPerUnit','BatchCost','BatchQty','WasteCost','WastePercent','OverheadPerUnit','TotalCost','Components'];
   sheet.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold');
-  // Transform rows: old format has 7 cols, new format needs 9
   var rows = [];
   for (var i = 0; i < costs.length; i++) {
     var c = costs[i];
     if (c.length === 7) {
-      // Old format: [parentCode, costPerUnit, batchCost, batchQty, wasteCost, wastePercent, components]
-      // Insert OverheadPerUnit=0 and TotalCost=costPerUnit
       rows.push([c[0], c[1], c[2], c[3], c[4], c[5], 0, c[1], c[6]]);
     } else if (c.length >= 9) {
       rows.push(c);
     } else {
-      // Pad with defaults
       while (c.length < 9) c.push(c.length === 7 ? c[1] : 0);
       rows.push(c);
     }
@@ -190,7 +216,6 @@ function writeCosts(ss, costs) {
 
 function writeExpenses(ss, expenses) {
   if (!expenses || typeof expenses !== 'object') return;
-  // expenses can be: JSON object {YYYY-MM: {total, accounts}} or stringified
   var sheet = getOrCreate(ss, 'ExpenseData');
   sheet.clear();
   var json = typeof expenses === 'string' ? expenses : JSON.stringify(expenses);
@@ -223,10 +248,8 @@ function saveMeta(ss, written, mode) {
 
 function getMainSheet() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  // Prefer the sheet named 'SalesData' (most robust — won't pick wrong tab)
   var byName = ss.getSheetByName('SalesData');
   if (byName) return byName;
-  // Fall back to GID match
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     if (sheets[i].getSheetId() == SHEET_GID) return sheets[i];
