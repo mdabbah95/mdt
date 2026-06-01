@@ -73,7 +73,7 @@ function handleFullSync(p) {
 
   // Clean up unnecessary sheets that waste cells
   try {
-    var junk = ['גיליון1', 'גיליון 1', 'Sheet1', 'sync_meta', 'SyncLog'];
+    var junk = ['גיליון1', 'גיליון 1', 'Sheet1', 'sync_meta', 'SyncLog', 'SalesData_new'];
     for (var j = 0; j < junk.length; j++) {
       var s = ss.getSheetByName(junk[j]);
       if (s && ss.getSheets().length > 1) ss.deleteSheet(s);
