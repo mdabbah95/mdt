@@ -206,7 +206,7 @@ function postToAppsScript(payload) {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(data),
             },
-            timeout: 120000, // 2 min for large datasets
+            timeout: 300000, // 5 min — delete+recreate sheet with 64K rows takes time
         };
 
         // Follow redirects (Apps Script redirects on deploy)
@@ -222,7 +222,7 @@ function postToAppsScript(payload) {
                         path: loc.pathname + loc.search,
                         method: 'GET', // Redirects from POST become GET
                         headers: {},
-                        timeout: 120000,
+                        timeout: 300000,
                     };
                     const rr = rmod.request(ropts, rres => {
                         const chunks = [];

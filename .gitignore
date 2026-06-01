@@ -1,1 +1,3 @@
 .netlify/
+server-setup/.env
+node_modules/
