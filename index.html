@@ -4820,10 +4820,9 @@ const APP = (() => {
         };
 
         await Promise.allSettled([
+            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=SalesData&_t=${ts}`,'gviz-name'),
             tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}&_t=${ts}`,'gviz-gid'),
-            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&_t=${ts}`,'gviz-default'),
             tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}&_t=${ts}`,'export-gid'),
-            tryFetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&_t=${ts}`,'export-default'),
         ]);
 
         // Pick the candidate with the most rows
